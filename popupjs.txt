@@ -1,0 +1,207 @@
+//global proparties
+var conn = null;
+var recordId = null;
+var sObjectName = null;
+var recordData = null;
+var parentObj = [];
+var fieldSet = [];
+var mandatoryFieldSet = [];
+var c=0;
+var finalRecData = '';
+var lookupRecId = '';
+var lookupRecName = '';
+var lookupVar = '';
+console.log('popup js loaded succesfully');
+document.querySelector("#getbutton").addEventListener("click", () => {
+	console.log('method invoked on button click');
+	chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+		console.log('inside tabs query');
+		var tab = tabs[0];
+		var instanceUrl = tab.url.split('.')[0] + '.my.salesforce.com';
+		console.log(tab);
+		var domainUrl = new URL(tab.url);
+		var sessionId = null;
+		if (tab.url && (tab.url.includes('.lightning.force.com') || tab.url.includes('.salesforce.com'))) {
+			var port = chrome.runtime.connect({ name: "knockknock" });
+			port.postMessage({ host: instanceUrl.replace('https://', '') });
+			port.onMessage.addListener(function (msg) {
+				console.log('response from backgroundjs' + msg.ssid);
+				sessionId = msg.ssid;
+				if (sessionId) {
+					console.log('session id received  ', sessionId);
+					conn = new jsforce.Connection({
+						serverUrl: instanceUrl,
+						instanceUrl: instanceUrl,
+						sessionId: sessionId,
+						version: '50.0',
+					});//jsforce
+					console.log('connection', conn);
+					fetchData();
+				} else {
+					alert('Salesforce Session Not found');
+				}
+			});
+		} else {
+			alert('Not a Salesforce Domain!, Keep Salesforce Tab Active and Run again');
+		}
+	})
+});
+
+function fetchData() {
+	console.log('fetch data method executed');
+	recordId = document.querySelector('#recordid').value.trim();
+	if(c==1){
+		recordId = lookupRecId;
+	}
+	var recPrefix = recordId.slice(0, 3);
+	if (recordId.length === 15 || recordId.length === 18) {
+		console.log('query', recordId);
+		console.log('recordPrefix', recPrefix);
+		// var mapOfPrefixAndObjects = new Map();
+
+		conn.describeGlobal(function (err, res) {
+			if (err) {
+				alert('something went wrong, please try again after sometime!');
+				return console.error(err);
+			}
+			//if no error below logic will be exicuted
+			console.log('Num of SObjects : ' + res.sobjects.length);
+			//console.log('whole obj', res.sobjects);
+			for (let obj of res.sobjects) {
+				if (obj.name && obj.keyPrefix && obj.keyPrefix == recPrefix) {
+					// mapOfPrefixAndObjects.set(obj.keyPrefix, obj.name);
+					sObjectName = obj.name;
+					break;
+				}
+			}
+			console.log('match found with prefix>>', sObjectName);
+			if (sObjectName) {
+				fetchAllData();
+			} else {
+				alert('Record Not found');
+			}
+			// ...
+		});
+	} else {
+		alert('Record Id Invalid');
+	}
+}
+
+function fetchAllData() {
+	console.log('inside get record data');
+	console.log('record id' + recordId + '//// sObjectName' + sObjectName);
+	//first getting sObject metadata. it contains userful infromation about fields
+	getsObjectMetadata();
+}
+
+//method to get all metadata of object, so that I can have access of field metadata with this.
+function getsObjectMetadata() {
+	console.log('this will prepare the data');
+	conn.sobject(sObjectName).describe(function(err, meta) {
+		if (err) { return console.error(err); }
+		console.log('Label : ' + meta.label);
+		console.log('Num of Fields : ' + meta.fields.length);
+		console.log('fields in object', meta.fields);
+		// ...
+		prepareMapOfFields(meta);
+		getRecordMetaData();
+	  });
+
+}
+
+//this will be called after sObjectmetadata call will get success.
+function getRecordMetaData(){
+	conn.sobject(sObjectName).retrieve(recordId, function (err, recordResult) {
+		if (err) {
+			return console.error(err);
+		}
+		console.log("sObjectData : " + JSON.stringify(recordResult,null,4));
+        recordData = recordResult;
+		var recordMapData = new Map();
+		var mapKeyData = new Map(Object.entries(JSON.parse(JSON.stringify(recordResult))));
+		/*for (const key of mapKeyData.keys()) {
+			console.log('key11--'+key+'--'+mapKeyData.get(key));
+			recordMapData.set(key, mapKeyData.get(key));
+		}*/
+
+		var recVar =  sObjectName.slice(0, 3);
+		var finalData = sObjectName +' ' + recVar +' =  new' + sObjectName+'();\n';
+		for (const key of mapKeyData.keys()) {
+			if(mapKeyData.get(key)!=null && mapKeyData.get(key)!=undefined && mapKeyData.get(key)!='' && key!= 'attributes' && key!='PhotoUrl' && fieldSet.includes(key)){
+				finalData += recVar + '.' + key + ' = \'' + mapKeyData.get(key) + '\';\n';
+			}	
+			
+		}
+		finalData += 'insert ' + recVar +';';
+		if(c==0){
+			finalRecData += finalData;
+			for (const key of mapKeyData.keys()) {
+				if(mapKeyData.get(key)!=null && mapKeyData.get(key)!=undefined && mapKeyData.get(key)!='' && parentObj.includes(key)){
+					console.log('lookup--'+key+'-'+mapKeyData.get(key));
+					lookupRecName = key;
+					lookupRecId = mapKeyData.get(key);
+					c++;
+					fetchData();
+				}	
+			}
+	    }
+		if(finalData === finalRecData){
+
+		}
+		else if(finalRecData!=null && c!=0){
+			let t = recVar + '.Id';
+			console.log('Resultfinalf---'+c);
+			//console.log('Resultfinalf---'+recVar + '--' + t);
+			let result = finalRecData;
+			//console.log('Resultfinalfff---'+finalRecData);
+			finalRecData = result.replace('\''+lookupRecId+'\'', t);
+			//console.log('Resultfinalfffaaaa---'+finalRecData);
+
+		}
+		
+		//console.log('ResultfinalLLLL---'+c+'--'+lookupVar);
+		
+		console.log('Resultfinal1---'+finalData);
+		console.log('Resultfinal2---'+finalRecData);
+		//this will collapse the output panale once result fetched
+		document.querySelector('#collapseOne').classList.add("show");
+		//this will show output to user
+		//document.querySelector('#floatingtextarea').innerHTML = JSON.stringify(recordResult,null,4);
+		document.querySelector('#floatingtextarea').innerHTML = finalData +'\n\n\n'+finalRecData;
+		// ...
+	});
+}
+
+var mapOfFieldsToBePrepared = null;
+function prepareMapOfFields(meta){
+	console.log('preparing the map of fields', meta.fields);
+	parentObj = [];
+	mandatoryFieldSet = [];
+	fieldSet = [];
+	for(let obj of meta.fields){
+			console.log('obj', obj);
+			console.log('obj1', obj.name);
+			/*if((obj['updateable'] == true) && (obj['updateable'] == false && obj['idLookup'] == true)){
+				console.log('obj name', obj.name);
+			}*/
+			if(obj['defaultedOnCreate'] != true && obj['defaultValueFormula'] != true && obj['updateable'] == true){
+				fieldSet.push(obj.name);
+				if(obj['nillable']== false){
+					mandatoryFieldSet.push(obj.name);
+				}
+				if(obj.referenceTo!=null && obj.referenceTo!=undefined && obj.referenceTo!='[]'){
+					parentObj.push(obj.name);
+				}
+			}
+
+	}
+	console.log('fieldset ', fieldSet);
+	console.log('mandatoryfieldset ', mandatoryFieldSet);
+    console.log('parent obj', parentObj);
+}
+
+
+
+
+
+

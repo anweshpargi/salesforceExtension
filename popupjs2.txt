@@ -1,0 +1,251 @@
+//global proparties
+var conn = null;
+var recordId = null;
+var sObjectName = null;
+//var recordData = null;
+var parentObj = [];
+var fieldSet = [];
+var mandatoryFieldSet = [];
+var c=0;
+var t=0;
+var finalRecData = '';
+var recordData = '';
+var lookupRecId = '';
+var lookupRecName = '';
+var lookupVar = '';
+var mapOfPrefixAndObjects = new Map();
+var mapKeyData1 = new Map();
+console.log('popup js loaded succesfully');
+document.querySelector("#getbutton").addEventListener("click", () => {
+	console.log('method invoked on button click');
+	chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+		console.log('inside tabs query');
+		var tab = tabs[0];
+		var instanceUrl = tab.url.split('.')[0] + '.my.salesforce.com';
+		console.log(tab);
+		var domainUrl = new URL(tab.url);
+		var sessionId = null;
+		if (tab.url && (tab.url.includes('.lightning.force.com') || tab.url.includes('.salesforce.com'))) {
+			var port = chrome.runtime.connect({ name: "knockknock" });
+			port.postMessage({ host: instanceUrl.replace('https://', '') });
+			port.onMessage.addListener(function (msg) {
+				console.log('response from backgroundjs' + msg.ssid);
+				sessionId = msg.ssid;
+				if (sessionId) {
+					console.log('session id received  ', sessionId);
+					conn = new jsforce.Connection({
+						serverUrl: instanceUrl,
+						instanceUrl: instanceUrl,
+						sessionId: sessionId,
+						version: '50.0',
+					});//jsforce
+					console.log('connection', conn);
+					fetchData();
+					//callFetchData();
+				} else {
+					alert('Salesforce Session Not found');
+				}
+			});
+		} else {
+			alert('Not a Salesforce Domain!, Keep Salesforce Tab Active and Run again');
+		}
+	})
+});
+function fetchData() {
+	console.log('fetch data method executed');
+	recordId = document.querySelector('#recordid').value.trim();
+	/*if(c>0 && lookupRecId!=null && lookupRecId!=undefined && lookupRecId!=''){
+		recordId = lookupRecId;
+	}*/
+	var recPrefix = recordId.slice(0, 3);
+	if (recordId.length === 15 || recordId.length === 18) {
+		console.log('query', recordId);
+		console.log('recordPrefix', recPrefix);
+		//var mapOfPrefixAndObjects = new Map();
+		console.log('call describe');
+		
+			conn.describeGlobal(function (err, res) {
+			console.log('call describe123');
+			if (err) {
+				alert('something went wrong, please try again after sometime!');
+				reject("Error")
+				return console.error(err);
+			}
+			//if no error below logic will be exicuted
+			console.log('Num of SObjects : ' + res.sobjects.length);
+			//console.log('whole obj', res.sobjects);
+			for (let obj of res.sobjects) {
+				mapOfPrefixAndObjects.set(obj.keyPrefix, obj.name);
+				if (obj.name && obj.keyPrefix && obj.keyPrefix == recPrefix) {
+					sObjectName = obj.name;
+					//break;
+				}
+			}
+	
+			console.log('match found with prefix>>', sObjectName);
+			console.log('match found with prefix1>>', mapOfPrefixAndObjects);
+			if (sObjectName) {
+				fetchAllData();
+			} else {
+				alert('Record Not found');
+			}
+			// ...
+		
+		});
+		
+	} else {
+		alert('Record Id Invalid');
+		
+	}
+	
+}
+
+function fetchAllData() {
+	console.log('inside get record data');
+	console.log('record id' + recordId + '//// sObjectName' + sObjectName);
+	//first getting sObject metadata. it contains userful infromation about fields
+	getsObjectMetadata(sObjectName);
+}
+
+//method to get all metadata of object, so that I can have access of field metadata with this.
+function getsObjectMetadata(sObjectName) {
+	console.log('this will prepare the data');
+	conn.sobject(sObjectName).describe(function(err, meta) {
+		if (err) { return console.error(err); }
+		console.log('Label : ' + meta.label);
+		console.log('Num of Fields : ' + meta.fields.length);
+		console.log('fields in object', meta.fields);
+		// ...
+		prepareMapOfFields(meta);
+		getRecordMetaData();
+	  });
+
+}
+
+//this will be called after sObjectmetadata call will get success.
+function getRecordMetaData(){
+	conn.sobject(sObjectName).retrieve(recordId, function (err, recordResult) {
+		if (err) {
+			return console.error(err);
+		}
+		console.log("sObjectData : " + JSON.stringify(recordResult,null,4));
+        //recordData = recordResult;
+		var mapKeyData = new Map(Object.entries(JSON.parse(JSON.stringify(recordResult))));
+		/*for (const key of mapKeyData.keys()) {
+			console.log('key11--'+key+'--'+mapKeyData.get(key));
+			recordMapData.set(key, mapKeyData.get(key));
+		}*/
+
+		var recVar =  sObjectName.slice(0, 3);
+		var finalData = sObjectName +' ' + recVar +' =  new' + sObjectName+'();\n';
+		for (const key of mapKeyData.keys()) {
+			if(mapKeyData.get(key)!=null && mapKeyData.get(key)!=undefined && mapKeyData.get(key)!='' && key!= 'attributes' && key!='PhotoUrl' && fieldSet.includes(key)){
+				finalData += recVar + '.' + key + ' = \'' + mapKeyData.get(key) + '\';\n';
+			}	
+			
+		}
+		finalData += 'insert ' + recVar +';\n\n';
+		if(c==0){
+			recordData = finalData;
+			mapKeyData1 = mapKeyData;
+			c++;
+		}
+		else{
+			let t = recVar + '.Id';
+			//console.log('Resultfinalf---'+recVar + '--' + t);
+			let result = recordData;
+			//console.log('Resultfinalfff---'+finalRecData);
+			recordData = result.replace('\''+lookupRecId+'\'', t);
+			finalRecData += finalData;
+		}
+		console.log('parent obj1', parentObj);
+		console.log('Resultfinal1---'+finalData);
+		console.log('Resultfinal2---'+finalRecData);
+		console.log('Resultfinal3---'+recordData);
+		
+		//if(c==0){
+			//finalRecData += finalData;
+			console.log('parent onj size1--'+parentObj.length+'---'+parentObj);
+			let t=0;
+			for (const key of mapKeyData1.keys()) {
+				if(mapKeyData1.get(key)!=null && mapKeyData1.get(key)!=undefined && mapKeyData1.get(key)!='' && parentObj.length > 0 && parentObj.includes(key)){
+					lookupRecId = '';
+					console.log('lookup--'+key+'-'+mapKeyData1.get(key)+'parent--'+parentObj.includes(key));
+					let index = parentObj.indexOf(key);
+					if (index > -1) { 
+    					parentObj.splice(index, 1); 
+					}
+					//lookupRecName = key;
+					lookupRecId = mapKeyData1.get(key);
+					recordId = lookupRecId;
+					//console.log('lookup sobjectname1--'+mapOfPrefixAndObjects);
+					//console.log('lookup sobjectname2--'+lookupRecId.slice(0, 3)+'--1'+mapOfPrefixAndObjects.has(lookupRecId.slice(0, 3))+'---2'+mapOfPrefixAndObjects.get(lookupRecId.slice(0, 3)));
+					if(mapOfPrefixAndObjects.has(lookupRecId.slice(0, 3))){
+						//lookupRecId = mapKeyData.get(key);
+						sObjectName = mapOfPrefixAndObjects.get(lookupRecId.slice(0, 3));
+						console.log('call metadata--'+sObjectName);
+						//getsObjectMetadata(sObjectName);
+						//setTimeout(getsObjectMetadata(sObjectName), t);
+						setTimeout(function () {
+							getsObjectMetadata(sObjectName);
+						  }, t); 
+						t=t+5000;
+						console.log('call back metadata--'+t);
+						
+					}
+					//c++;
+					/*if(t==0){
+						fetchData();
+					}
+					else{*/
+					console.log('parent onj size2--'+parentObj.length+'---'+parentObj);
+					//setTimeout(fetchData, 9000);//fetchData();
+				}	
+			}
+	    document.querySelector('#collapseOne').classList.add("show");
+		//this will show output to user
+		//document.querySelector('#floatingtextarea').innerHTML = JSON.stringify(recordResult,null,4);
+		document.querySelector('#floatingtextarea').innerHTML = finalRecData + recordData;
+		// ...
+	});
+}
+
+var mapOfFieldsToBePrepared = null;
+function prepareMapOfFields(meta){
+	console.log('preparing the map of fields', meta.fields);
+	console.log('parent objL1', parentObj);
+	//parentObj = [];
+	mandatoryFieldSet = [];
+	fieldSet = [];
+	for(let obj of meta.fields){
+			//console.log('obj', obj);
+			//console.log('obj1', obj.name);
+			/*if((obj['updateable'] == true) && (obj['updateable'] == false && obj['idLookup'] == true)){
+				console.log('obj name', obj.name);
+			}*/
+			if(obj['defaultedOnCreate'] != true && obj['defaultValueFormula'] != true && obj['updateable'] == true){
+				fieldSet.push(obj.name);
+				if(obj['nillable']== false){
+					mandatoryFieldSet.push(obj.name);
+				}
+				//console.log('reference--'+obj.name + obj['referenceTo'].length);
+				if(obj['referenceTo'].length > 0 && obj['relationshipName']!=null && c==0){
+					console.log('reference--'+obj.name +'----' + obj['referenceTo'].length);
+					//console.log('obj', obj);
+					//console.log('obj1', obj.name);
+					parentObj.push(obj.name);
+				}
+			}
+
+	}
+	
+	console.log('fieldset ', fieldSet);
+	console.log('mandatoryfieldset ', mandatoryFieldSet);
+    console.log('parent obj', parentObj);
+}
+
+
+
+
+
+

@@ -1,0 +1,28 @@
+    {
+        "name": "Salesforce SOQL Enhancer",
+        "description": "An Extension that helps to Execute the Large Length Query",
+        "version": "1.0",
+        "manifest_version": 3,
+        "permissions": [
+            "storage",
+            "cookies",
+            "contentSettings",
+            "clipboardWrite",
+            "activeTab"
+        ],
+        "host_permissions": [
+            "https://*.salesforce.com/*",
+            "https://*.force.com/*",
+            "https://*.cloudforce.com/*",
+            "https://*.visualforce.com/*"
+          ],
+        "background": {
+            "service_worker": "background.js"
+         },
+        "web_accessible_resources": [],
+        "action": {
+            "default_title": "Salesforce SOQL Enhancer",
+            "default_icon": "icon.png",
+            "default_popup": "popup.html"
+        }
+    }
